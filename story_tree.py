@@ -89,6 +89,9 @@ class StoryTreeNode:
 
         topic_keywords_list = []
         for i, community in enumerate(communities):
-            print(f"Community {i + 1}: {list(community)}")
+            # 排除长度是1的, 一个关键词比较模糊
+            if len(list(community)) == 1:
+                logger.info(f"Community {i + 1}: {list(community)}")
+                continue
             topic_keywords_list.append(list(community))
         return topic_keywords_list
