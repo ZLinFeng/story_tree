@@ -4,7 +4,7 @@
 @date    2023/8/8 13:16
 @author  zlf
 """
-from sqlalchemy import Column, Integer, DateTime, String, Enum, Float
+from sqlalchemy import Column, Integer, DateTime, String, Enum, Float, Text
 from sqlalchemy.ext.declarative import declarative_base
 from enum import Enum as PyEnum
 
@@ -29,10 +29,11 @@ class Job(Base):
 class Corpus(Base):
     __tablename__ = "tb_corpus"
 
-    uid = Column("uid", String, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uid = Column(String(50))
     job_id = Column(Integer)
-    title = Column(String)
-    content = Column(String)
+    title = Column(Text)
+    content = Column(Text)
 
 
 class ClusterNews(Base):
@@ -41,11 +42,12 @@ class ClusterNews(Base):
     """
     __tablename__ = "tb_cluster_news"
 
-    uid = Column(String, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uid = Column(String(50))
     job_id = Column(Integer)
     cluster_id = Column(Integer)
     cos = Column(Float)
-    keywords = Column(String)
+    keywords = Column(Text)
 
 
 class Cluster(Base):
@@ -57,4 +59,4 @@ class Cluster(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     job_id = Column(Integer)
     cluster_id = Column(Integer)
-    keywords = Column(String)
+    keywords = Column(Text)

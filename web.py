@@ -26,13 +26,13 @@ def create_app() -> FastAPI:
     )
 
     @app.post("/cluster", response_model=int)
-    @used_time
+    # @used_time
     async def post(body: ClusterRequest, request: Request):
         return create_job(body)
 
     @app.get("/job/{job_id}")
     @used_time
-    async def res(job_id: int):
+    async def res(job_id: int, request: Request):
         return {"item_id": job_id}
 
     return app

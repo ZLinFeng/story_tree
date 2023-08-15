@@ -15,4 +15,4 @@ if __name__ == '__main__':
     t = threading.Thread(target=schedule_run)
     t.start()
     app = create_app()
-    uvicorn.run(app, port=18113, host="0.0.0.0", workers=10)
+    uvicorn.run(app, port=18113, host="0.0.0.0", workers=1)

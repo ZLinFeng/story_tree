@@ -20,13 +20,14 @@ from config import __keywords_url__, __keywords_process_num__, __similarity_proc
 from typing import Optional
 from loguru import logger
 
-from database import get_request_job, list_news_by_job_id, add_cluster_news, add_cluster
+from database import add_cluster_news_list, finish_job_by_id, get_request_job, list_news_by_job_id, add_cluster_news, add_cluster, running_job_by_id
 from story_tree import StoryTreeNode
 from do import ClusterNews
 
 
 def request_keywords(text: str) -> Optional[list]:
-    res = requests.post(__keywords_url__, json={"content": text, "lang": "zh-CN"})
+    res = requests.post(__keywords_url__, json={
+                        "content": text, "lang": "zh-CN"})
     try:
         obj = json.loads(res.text)
         res = obj["new_answer"]
@@ -39,9 +40,12 @@ def request_keywords(text: str) -> Optional[list]:
 def keywords_thread(request_queue, collect):
     while True:
         item = request_queue.get()
-        content = item["content"]
         if item is None:
             break
+        content = item["content"]
+        if len(content) <= 100:
+            continue
+        content = clean_news(content)
         keywords_res = request_keywords(content)
         item["keywords"] = keywords_res
         collect.append(item)
@@ -56,7 +60,8 @@ def keywords(news: list) -> list:
 
         # 创建并启动关键词抽取进程
         for number in range(__keywords_process_num__):
-            process = Process(target=keywords_thread, args=(request_queue, collect))
+            process = Process(target=keywords_thread,
+                              args=(request_queue, collect))
             process.start()
             processes.append(process)
 
@@ -69,7 +74,7 @@ def keywords(news: list) -> list:
         # 等待所有进程完成
         for process in processes:
             process.join()
-        return collect
+        return list(collect)
 
 
 def request_producer(news, request_queue):
@@ -92,12 +97,17 @@ def request_consumer(request_queue, response_queue, topic_keywords_list):
         max_topic = 0
         max_similarities = 0.0
         for topic_index, topic_words in enumerate(topic_keywords_list):
-            vectorizer = TfidfVectorizer()
-            features = vectorizer.fit_transform([" ".join(words), " ".join(topic_words)])
-            cosine_similarities = cosine_similarity(features[0], features[1])
-            if cosine_similarities[0][0] > max_similarities:
-                max_topic = topic_index
-                max_similarities = cosine_similarities[0][0]
+            try:
+                vectorizer = TfidfVectorizer()
+                features = vectorizer.fit_transform(
+                    [" ".join(words), " ".join(topic_words)])
+                cosine_similarities = cosine_similarity(
+                    features[0], features[1])
+                if cosine_similarities[0][0] > max_similarities:
+                    max_topic = topic_index
+                    max_similarities = cosine_similarities[0][0]
+            except Exception as e:
+                logger.error("Similarity exception.", e)
         topic_name = str(max_topic)
         item["topic"] = topic_name
         item["cos"] = max_similarities
@@ -109,6 +119,7 @@ def response_consumer(response_queue, topic_keywords_list, job_id):
     res = {}
     total = 0
     receiver_none = 0
+    batch = []
     while True:
         item = response_queue.get()
         if item is None:
@@ -120,17 +131,21 @@ def response_consumer(response_queue, topic_keywords_list, job_id):
                 continue
         total += 1
         logger.info(f"Finish: {total}")
-        add_cluster_news(news_uid=item["uid"],
-                         job_id=job_id,
-                         cluster_id=int(item["topic"]),
-                         cos=item["cos"],
-                         keywords=item["keywords"])
+        batch.append({"uid": item["uid"], "cluster_id": int(
+            item["topic"]), "cos": item["cos"], "keywords": item["keywords"]})
+        if len(batch) >= 1000:
+            add_cluster_news_list(batch, job_id)
+            batch = []
         topic_name = item["topic"]
         if not res.__contains__(topic_name):
             res[topic_name] = topic_keywords_list[int(topic_name)]
 
-        for key, value in res.items():
-            add_cluster(job_id=job_id, cluster_id=int(key), keywords=",".join(value))
+    if len(batch) > 0:
+        add_cluster_news_list(batch, job_id)
+
+    for key, value in res.items():
+        add_cluster(job_id=job_id, cluster_id=int(
+            key), keywords=",".join(value))
 
 
 def graph_cluster(news: list, job_id: int):
@@ -138,14 +153,16 @@ def graph_cluster(news: list, job_id: int):
     news_keywords = [one["keywords"] for one in news]
     tree = StoryTreeNode(g=G, keywords=news_keywords)
     tree.keywords_edge_filter()
-    topic_keywords_list = tree.community_detect(0.001)
+    topic_keywords_list = tree.community_detect(0.0005)
     # 创建两个队列
     request_queue = Queue(maxsize=100)
     response_queue = Queue(maxsize=100)
 
-    producer_thread = Process(target=request_producer, args=(news, request_queue))
+    producer_thread = Process(target=request_producer,
+                              args=(news, request_queue))
 
-    response_consumer_thread = Process(target=response_consumer, args=(response_queue, topic_keywords_list, job_id))
+    response_consumer_thread = Process(target=response_consumer, args=(
+        response_queue, topic_keywords_list, job_id))
 
     # 启动
     consumer_threads = []
@@ -166,14 +183,25 @@ def graph_cluster(news: list, job_id: int):
     response_consumer_thread.join()
 
 
+def clean_news(news: str) -> str:
+    lines = news.split("\n")
+    lines = [line for line in lines if len(line) > 30]
+    return "\n".join(lines)
+
+
 def story_tree_cluster():
     job_id = get_request_job()
     if job_id == 0:
         return
     news_list = list_news_by_job_id(job_id)
+    if news_list is None:
+        return
     logger.info("Start Cluster...")
+    running_job_by_id(job_id)
     news_list_with_keywords = keywords(news_list)
     graph_cluster(news_list_with_keywords, job_id)
+    finish_job_by_id(job_id)
+    logger.info("End Cluster...")
 
 
 def schedule_run():
